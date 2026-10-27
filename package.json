@@ -1,1 +1,133 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  query, 
+  orderBy, 
+  onSnapshot, 
+  serverTimestamp, 
+  doc, 
+  setDoc, 
+  getDoc 
+} from 'firebase/firestore';
+import { MessageCircle, Heart, User, LogOut, Send, Flame, Sparkles } from 'lucide-react';
 
+const firebaseConfig = {
+  apiKey: "AIzaSyD-Placeholder-Key-DatingApp",
+  authDomain: "dating-app-web.firebaseapp.com",
+  projectId: "dating-app-web",
+  storageBucket: "dating-app-web.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRegister, setIsRegister] = useState(false);
+  const [currentTab, setCurrentTab] = useState('swipe');
+  
+  const [profiles, setProfiles] = useState([
+    { id: '1', name: 'Linh Chi', age: 22, bio: 'Thích xem phim, uống trà sữa và du lịch cuối tuần ✨', image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60' },
+    { id: '2', name: 'Phương Thảo', age: 24, bio: 'Tìm người cùng đi cà phê sách và nghe nhạc Jazz ☕', image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=500&auto=format&fit=crop&q=60' },
+    { id: '3', name: 'Hoàng Anh', age: 25, bio: 'Yêu thể thao, thích chụp ảnh hoàng hôn 📸', image: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=500&auto=format&fit=crop&q=60' }
+  ]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [matches, setMatches] = useState([]);
+
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (currentTab === 'chat') {
+      const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+      return () => unsubscribe();
+    }
+  }, [currentTab]);
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    try {
+      if (isRegister) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error) {
+      alert("Lỗi xác thực: " + error.message);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      alert("Lỗi đăng nhập Google: " + error.message);
+    }
+  };
+
+  const handleSwipe = (direction) => {
+    if (direction === 'right') {
+      const liked = profiles[currentIndex];
+      setMatches(prev => [...prev, liked]);
+    }
+    setCurrentIndex(prev => prev + 1);
+  };
+
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+    await addDoc(collection(db, 'messages'), {
+      text: newMessage,
+      uid: user.uid,
+      email: user.email || 'Thành viên',
+      createdAt: serverTimestamp()
+    });
+    setNewMessage('');
+  };
+
+  if (loading) {
+    return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-rose-500 font-bold">Đang tải ứng dụng...</div>;
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white">
+        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
+          <div className="flex justify-center mb-6 text-rose-500"><Flame size={48} /></div>
+          <h1 className="text-2xl font-black text-center mb-2">Hẹn Hò & Nhắn Tin</h1>
+          <p className="text-slate-400 text-center text-sm mb-6">Kết nối yêu thương trong tầm tay</p>
+          
+          <form onSubmit={handleAuth} className="space-y-4">
+            <input type="email" placeholder="Email của bạn" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-rose-500" required />
+            <input type="password" placeholder="Mật khẩu" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-rose-500" required />
+            <button type="submit" className="w-full bg-gradient-
