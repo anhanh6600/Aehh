@@ -28,13 +28,15 @@ if (!document.getElementById('tailwind-cdn')) {
   document.head.appendChild(style);
 }
 
+// Cấu hình Firebase thật của bạn
 const firebaseConfig = {
-  apiKey: "AIzaSyD-Placeholder-Key-DatingApp",
-  authDomain: "dating-app-web.firebaseapp.com",
-  projectId: "dating-app-web",
-  storageBucket: "dating-app-web.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
+  apiKey: "AIzaSyDY7mpeXKj5UgrEEKyMZcjL_W9XFZHYLwc",
+  authDomain: "nguyen-anh-d9f91.firebaseapp.com",
+  projectId: "nguyen-anh-d9f91",
+  storageBucket: "nguyen-anh-d9f91.firebasestorage.app",
+  messagingSenderId: "48825173466",
+  appId: "1:48825173466:web:d0dce6896a574573642ce3",
+  measurementId: "G-JPJ28V5WSV"
 };
 
 const app = initializeApp(firebaseConfig);
