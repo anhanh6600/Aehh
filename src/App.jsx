@@ -10,14 +10,17 @@ import {
 import { 
   doc, 
   getDoc, 
+  getDocs,
   collection, 
   addDoc, 
+  setDoc,
+  arrayUnion,
   query, 
   orderBy, 
   onSnapshot, 
   serverTimestamp 
 } from 'firebase/firestore';
-import { MessageCircle, Heart, LogOut, Send, Flame, Sparkles, User, Edit3 } from 'lucide-react';
+import { MessageCircle, Heart, LogOut, Send, Flame, User, Edit3, RefreshCw } from 'lucide-react';
 import { auth, db } from './firebase';
 import ProfileForm from './ProfileForm';
 
@@ -32,11 +35,12 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('swipe');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
 
-  const [profiles] = useState([
-    { id: '1', name: 'Linh Chi', age: 22, bio: 'Thích xem phim, uống trà sữa và du lịch cuối tuần ✨', image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60' },
-    { id: '2', name: 'Phương Thảo', age: 24, bio: 'Tìm người cùng đi cà phê sách và nghe nhạc Jazz ☕', image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=500&auto=format&fit=crop&q=60' }
-  ]);
+  // State Quẹt thẻ Dữ liệu thật
+  const [feedProfiles, setFeedProfiles] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+
+  // State Chat
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
 
@@ -53,11 +57,14 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Lấy dữ liệu hồ sơ cá nhân
   const fetchUserProfile = async (uid) => {
     try {
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists()) {
-        setUserProfile(userDoc.data());
+        const data = userDoc.data();
+        setUserProfile(data);
+        await loadFeedProfiles(uid, data.likes || [], data.passes || []);
       } else {
         setIsEditingProfile(true);
       }
@@ -66,6 +73,66 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Tải danh sách người dùng thật từ Firestore (Loại trừ bản thân & những người đã tương tác)
+  const loadFeedProfiles = async (currentUid, likes = [], passes = []) => {
+    setLoadingProfiles(true);
+    try {
+      const querySnapshot = await getDocs(collection(db, 'users'));
+      const interactedSet = new Set([currentUid, ...likes, ...passes]);
+      
+      const availableProfiles = [];
+      querySnapshot.forEach((docSnap) => {
+        if (!interactedSet.has(docSnap.id)) {
+          availableProfiles.push({ id: docSnap.id, ...docSnap.data() });
+        }
+      });
+
+      setFeedProfiles(availableProfiles);
+      setCurrentIndex(0);
+    } catch (error) {
+      console.error("Lỗi tải danh sách hồ sơ:", error);
+    } finally {
+      setLoadingProfiles(false);
+    }
+  };
+
+  // Xử lý quẹt thẻ (Thích / Bỏ qua)
+  const handleSwipe = async (direction) => {
+    if (!feedProfiles[currentIndex] || !user) return;
+
+    const targetUser = feedProfiles[currentIndex];
+    const userRef = doc(db, 'users', user.uid);
+
+    try {
+      if (direction === 'right') {
+        // Lưu ID người được thích vào danh sách 'likes'
+        await setDoc(userRef, {
+          likes: arrayUnion(targetUser.id)
+        }, { merge: true });
+
+        // Cập nhật lại state local
+        setUserProfile(prev => ({
+          ...prev,
+          likes: [...(prev?.likes || []), targetUser.id]
+        }));
+      } else {
+        // Lưu ID bị bỏ qua vào danh sách 'passes'
+        await setDoc(userRef, {
+          passes: arrayUnion(targetUser.id)
+        }, { merge: true });
+
+        setUserProfile(prev => ({
+          ...prev,
+          passes: [...(prev?.passes || []), targetUser.id]
+        }));
+      }
+    } catch (error) {
+      console.error("Lỗi khi lưu tương tác quẹt thẻ:", error);
+    }
+
+    setCurrentIndex(prev => prev + 1);
   };
 
   const handleAuth = async (e) => {
@@ -148,11 +215,14 @@ export default function App() {
         onComplete={(newProfile) => {
           setUserProfile(newProfile);
           setIsEditingProfile(false);
+          loadFeedProfiles(user.uid, newProfile.likes || [], newProfile.passes || []);
         }} 
         onCancel={() => setIsEditingProfile(false)} 
       />
     );
   }
+
+  const currentCard = feedProfiles[currentIndex];
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col max-w-md mx-auto relative pb-20">
@@ -166,20 +236,44 @@ export default function App() {
 
       <main className="flex-1 p-4 flex flex-col items-center justify-center">
         {currentTab === 'swipe' && (
-          currentIndex < profiles.length ? (
+          loadingProfiles ? (
+            <div className="text-slate-400 text-sm">Đang tìm kiếm người phù hợp...</div>
+          ) : currentCard ? (
             <div className="w-full max-w-xs bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
-              <img src={profiles[currentIndex].image} alt="Profile" className="w-full h-80 object-cover" />
+              <img 
+                src={currentCard.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60'} 
+                alt="Profile" 
+                className="w-full h-80 object-cover" 
+              />
               <div className="p-5">
-                <h2 className="text-xl font-bold">{profiles[currentIndex].name}, {profiles[currentIndex].age}</h2>
-                <p className="text-slate-400 text-sm mt-2">{profiles[currentIndex].bio}</p>
+                <h2 className="text-xl font-bold">{currentCard.displayName || 'Thành viên'}, {currentCard.age || '??'}</h2>
+                <p className="text-slate-400 text-sm mt-2 min-h-[40px]">{currentCard.bio || 'Chưa cập nhật tiểu sử.'}</p>
                 <div className="flex justify-around mt-6">
-                  <button onClick={() => setCurrentIndex(prev => prev + 1)} className="w-14 h-14 bg-slate-800 rounded-full flex items-center justify-center text-red-400 border border-slate-700 text-xl font-bold shadow">✕</button>
-                  <button onClick={() => setCurrentIndex(prev => prev + 1)} className="w-14 h-14 bg-rose-500 rounded-full flex items-center justify-center text-white text-xl shadow-lg">❤️</button>
+                  <button 
+                    onClick={() => handleSwipe('left')} 
+                    className="w-14 h-14 bg-slate-800 rounded-full flex items-center justify-center text-red-400 border border-slate-700 text-xl font-bold shadow hover:bg-slate-700 transition"
+                  >
+                    ✕
+                  </button>
+                  <button 
+                    onClick={() => handleSwipe('right')} 
+                    className="w-14 h-14 bg-rose-500 rounded-full flex items-center justify-center text-white text-xl shadow-lg hover:bg-rose-600 transition"
+                  >
+                    ❤️
+                  </button>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="text-center p-6 text-slate-400">Đã xem hết hồ sơ quanh đây! Hãy quay lại sau nhé.</div>
+            <div className="text-center p-6 text-slate-400 flex flex-col items-center gap-3">
+              <p>Đã xem hết tất cả hồ sơ quanh đây!</p>
+              <button 
+                onClick={() => loadFeedProfiles(user.uid, userProfile?.likes || [], userProfile?.passes || [])} 
+                className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl text-xs text-rose-400 hover:text-rose-300"
+              >
+                <RefreshCw size={14} /> Tải lại danh sách
+              </button>
+            </div>
           )
         )}
 
