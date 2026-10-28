@@ -20,7 +20,7 @@ import {
   onSnapshot, 
   serverTimestamp 
 } from 'firebase/firestore';
-import { MessageCircle, Heart, LogOut, Send, Flame, User, Edit3, RefreshCw } from 'lucide-react';
+import { MessageCircle, Heart, LogOut, Send, Flame, User, Edit3, RefreshCw, Sparkles } from 'lucide-react';
 import { auth, db } from './firebase';
 import ProfileForm from './ProfileForm';
 
@@ -35,10 +35,12 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('swipe');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
 
-  // State Quẹt thẻ Dữ liệu thật
+  // State Quẹt thẻ & Tương hợp
   const [feedProfiles, setFeedProfiles] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [matchedModalUser, setMatchedModalUser] = useState(null); // Popup khi match thành công
+  const [matchesList, setMatchesList] = useState([]);
 
   // State Chat
   const [messages, setMessages] = useState([]);
@@ -57,14 +59,13 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Lấy dữ liệu hồ sơ cá nhân
   const fetchUserProfile = async (uid) => {
     try {
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists()) {
         const data = userDoc.data();
         setUserProfile(data);
-        await loadFeedProfiles(uid, data.likes || [], data.passes || []);
+        await loadFeedAndMatches(uid, data.likes || [], data.passes || []);
       } else {
         setIsEditingProfile(true);
       }
@@ -75,30 +76,45 @@ export default function App() {
     }
   };
 
-  // Tải danh sách người dùng thật từ Firestore (Loại trừ bản thân & những người đã tương tác)
-  const loadFeedProfiles = async (currentUid, likes = [], passes = []) => {
+  const loadFeedAndMatches = async (currentUid, likes = [], passes = []) => {
     setLoadingProfiles(true);
     try {
       const querySnapshot = await getDocs(collection(db, 'users'));
       const interactedSet = new Set([currentUid, ...likes, ...passes]);
       
       const availableProfiles = [];
+      const matchedUsers = [];
+
       querySnapshot.forEach((docSnap) => {
-        if (!interactedSet.has(docSnap.id)) {
-          availableProfiles.push({ id: docSnap.id, ...docSnap.data() });
+        const otherId = docSnap.id;
+        const otherData = docSnap.data();
+
+        if (otherId === currentUid) return;
+
+        // Kiểm tra nếu người kia nằm trong danh sách đã thích mình
+        const otherLikes = otherData.likes || [];
+        const isMutualMatch = likes.includes(otherId) && otherLikes.includes(currentUid);
+
+        if (isMutualMatch) {
+          matchedUsers.push({ id: otherId, ...otherData });
+        }
+
+        // Đưa vào danh sách quẹt thẻ nếu chưa tương tác
+        if (!interactedSet.has(otherId)) {
+          availableProfiles.push({ id: otherId, ...otherData });
         }
       });
 
       setFeedProfiles(availableProfiles);
+      setMatchesList(matchedUsers);
       setCurrentIndex(0);
     } catch (error) {
-      console.error("Lỗi tải danh sách hồ sơ:", error);
+      console.error("Lỗi tải dữ liệu:", error);
     } finally {
       setLoadingProfiles(false);
     }
   };
 
-  // Xử lý quẹt thẻ (Thích / Bỏ qua)
   const handleSwipe = async (direction) => {
     if (!feedProfiles[currentIndex] || !user) return;
 
@@ -107,18 +123,25 @@ export default function App() {
 
     try {
       if (direction === 'right') {
-        // Lưu ID người được thích vào danh sách 'likes'
+        // Cập nhật likes của mình trên Firestore
         await setDoc(userRef, {
           likes: arrayUnion(targetUser.id)
         }, { merge: true });
 
-        // Cập nhật lại state local
-        setUserProfile(prev => ({
-          ...prev,
-          likes: [...(prev?.likes || []), targetUser.id]
-        }));
+        const updatedLikes = [...(userProfile?.likes || []), targetUser.id];
+        setUserProfile(prev => ({ ...prev, likes: updatedLikes }));
+
+        // Kiểm tra xem đối phương đã thích mình chưa
+        const targetDoc = await getDoc(doc(db, 'users', targetUser.id));
+        if (targetDoc.exists()) {
+          const targetData = targetDoc.data();
+          if (targetData.likes && targetData.likes.includes(user.uid)) {
+            // MATCH THÀNH CÔNG!
+            setMatchedModalUser(targetUser);
+            setMatchesList(prev => [...prev, targetUser]);
+          }
+        }
       } else {
-        // Lưu ID bị bỏ qua vào danh sách 'passes'
         await setDoc(userRef, {
           passes: arrayUnion(targetUser.id)
         }, { merge: true });
@@ -129,7 +152,7 @@ export default function App() {
         }));
       }
     } catch (error) {
-      console.error("Lỗi khi lưu tương tác quẹt thẻ:", error);
+      console.error("Lỗi quẹt thẻ:", error);
     }
 
     setCurrentIndex(prev => prev + 1);
@@ -215,7 +238,7 @@ export default function App() {
         onComplete={(newProfile) => {
           setUserProfile(newProfile);
           setIsEditingProfile(false);
-          loadFeedProfiles(user.uid, newProfile.likes || [], newProfile.passes || []);
+          loadFeedAndMatches(user.uid, newProfile.likes || [], newProfile.passes || []);
         }} 
         onCancel={() => setIsEditingProfile(false)} 
       />
@@ -226,6 +249,31 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col max-w-md mx-auto relative pb-20">
+      {/* Popup thông báo Match thành công */}
+      {matchedModalUser && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+          <Sparkles className="text-rose-500 mb-4 animate-bounce" size={48} />
+          <h2 className="text-3xl font-black text-rose-500 mb-2">It's a Match!</h2>
+          <p className="text-slate-300 text-sm mb-6">Bạn và {matchedModalUser.displayName} đã thích nhau.</p>
+          <div className="flex gap-4 mb-8">
+            <img src={userProfile?.photoURL} alt="You" className="w-24 h-24 rounded-full object-cover border-2 border-rose-500 shadow-xl" />
+            <img src={matchedModalUser.photoURL} alt="Partner" className="w-24 h-24 rounded-full object-cover border-2 border-rose-500 shadow-xl" />
+          </div>
+          <button 
+            onClick={() => { setMatchedModalUser(null); setCurrentTab('matches'); }}
+            className="w-full max-w-xs bg-rose-500 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-rose-600 transition"
+          >
+            Xem danh sách tương hợp
+          </button>
+          <button 
+            onClick={() => setMatchedModalUser(null)}
+            className="mt-3 text-slate-400 text-xs hover:underline"
+          >
+            Tiếp tục quẹt thẻ
+          </button>
+        </div>
+      )}
+
       <header className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-950 sticky top-0 z-10">
         <div className="flex items-center gap-2 text-rose-500 font-black text-lg"><Flame /><span>Aehh Dating</span></div>
         <div className="flex items-center gap-3">
@@ -237,7 +285,7 @@ export default function App() {
       <main className="flex-1 p-4 flex flex-col items-center justify-center">
         {currentTab === 'swipe' && (
           loadingProfiles ? (
-            <div className="text-slate-400 text-sm">Đang tìm kiếm người phù hợp...</div>
+            <div className="text-slate-400 text-sm">Đang tìm kiếm hồ sơ...</div>
           ) : currentCard ? (
             <div className="w-full max-w-xs bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 shadow-xl">
               <img 
@@ -268,13 +316,34 @@ export default function App() {
             <div className="text-center p-6 text-slate-400 flex flex-col items-center gap-3">
               <p>Đã xem hết tất cả hồ sơ quanh đây!</p>
               <button 
-                onClick={() => loadFeedProfiles(user.uid, userProfile?.likes || [], userProfile?.passes || [])} 
+                onClick={() => loadFeedAndMatches(user.uid, userProfile?.likes || [], userProfile?.passes || [])} 
                 className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl text-xs text-rose-400 hover:text-rose-300"
               >
                 <RefreshCw size={14} /> Tải lại danh sách
               </button>
             </div>
           )
+        )}
+
+        {currentTab === 'matches' && (
+          <div className="w-full h-full flex flex-col">
+            <h2 className="text-lg font-bold mb-4 flex items-center gap-2"><Sparkles className="text-rose-500" /> Tương hợp của bạn ({matchesList.length})</h2>
+            {matchesList.length === 0 ? (
+              <div className="text-center text-slate-500 text-sm mt-10">Chưa có lượt tương hợp nào. Hãy quẹt phải tích cực hơn nhé!</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                {matchesList.map(m => (
+                  <div key={m.id} className="bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow">
+                    <img src={m.photoURL} alt={m.displayName} className="w-full h-36 object-cover" />
+                    <div className="p-3">
+                      <h3 className="font-bold text-sm">{m.displayName}, {m.age}</h3>
+                      <button onClick={() => setCurrentTab('chat')} className="mt-2 w-full bg-rose-500 text-white text-xs py-1.5 rounded-lg font-semibold">Nhắn tin</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {currentTab === 'profile' && (
@@ -308,7 +377,7 @@ export default function App() {
 
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-950 border-t border-slate-900 flex justify-around py-3 z-20">
         <button onClick={() => setCurrentTab('swipe')} className={`flex flex-col items-center ${currentTab === 'swipe' ? 'text-rose-500' : 'text-slate-500'} text-xs gap-1`}><Flame size={22} />Khám phá</button>
-        <button onClick={() => setCurrentTab('profile')} className={`flex flex-col items-center ${currentTab === 'profile' ? 'text-rose-500' : 'text-slate-500'} text-xs gap-1`}><User size={22} />Hồ sơ</button>
+        <button onClick={() => setCurrentTab('matches')} className={`flex flex-col items-center ${currentTab === 'matches' ? 'text-rose-500' : 'text-slate-500'} text-xs gap-1`}><Heart size={22} />Tương hợp</button>
         <button onClick={() => setCurrentTab('chat')} className={`flex flex-col items-center ${currentTab === 'chat' ? 'text-rose-500' : 'text-slate-500'} text-xs gap-1`}><MessageCircle size={22} />Nhắn tin</button>
       </nav>
     </div>
